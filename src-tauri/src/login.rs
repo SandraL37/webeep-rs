@@ -2,7 +2,7 @@ use crate::AppState;
 use base64::Engine;
 use tauri::{Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, specta::Type)]
 pub enum LoginError {
     LoginWindowClosed,
     IncompatibleWithCurrentWeBeep,
@@ -30,46 +30,12 @@ impl std::fmt::Display for LoginError {
 
 impl std::error::Error for LoginError {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub enum LoginState {
     Logged { token: String },
     NotLogged,
     Logging,
     Error { error: LoginError },
-}
-
-impl LoginState {
-    pub fn get_frontend_state(&self) -> FrontendLoginState {
-        let state = match &self {
-            LoginState::NotLogged => "NotLogged",
-            LoginState::Logging => "Logging",
-            LoginState::Logged { .. } => "Logged",
-            LoginState::Error { .. } => "Error",
-        };
-
-        let token = match &self {
-            LoginState::Logged { token } => Some(token.clone()),
-            _ => None,
-        };
-
-        let error = match &self {
-            LoginState::Error { error } => Some(error.clone()),
-            _ => None,
-        };
-
-        FrontendLoginState {
-            state: state.to_string(),
-            token,
-            error: error.map(|e| e.to_string()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct FrontendLoginState {
-    state: String,
-    token: Option<String>,
-    error: Option<String>,
 }
 
 pub struct LoginManager {
@@ -121,7 +87,7 @@ impl LoginManager {
         }
         self.state = state;
 
-        app.emit("login-state-changed", self.state.get_frontend_state())?;
+        app.emit("login-state-changed", self.state.clone())?;
         Ok(())
     }
 
@@ -184,15 +150,14 @@ impl LoginManager {
 
         let app_cloned = app.clone();
 
-        tauri::async_runtime::spawn(async move {
+        {
             let state = app_cloned.state::<AppState>();
             state
                 .login_manager
                 .lock()
                 .await
-                .set_state(&app_cloned, LoginState::Logging)
-        })
-        .await??;
+                .set_state(&app_cloned, LoginState::Logging)?;
+        }
 
         let app_cloned = app.clone();
 
@@ -249,16 +214,15 @@ impl LoginManager {
 
     pub async fn logout(app: tauri::AppHandle) -> Result<(), LoginError> {
         Self::write_token(None)?;
-        tauri::async_runtime::spawn(async move {
+        {
             let state = app.state::<AppState>();
 
             state
                 .login_manager
                 .lock()
                 .await
-                .set_state(&app, LoginState::NotLogged)
-        })
-        .await??;
+                .set_state(&app, LoginState::NotLogged)?;
+        }
 
         Ok(())
     }

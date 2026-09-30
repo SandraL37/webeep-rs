@@ -1,21 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-export type LoginState = {
-  state: "NotLogged" | "Logging" | "Logged" | "Error";
-  token: string | null;
-  error: string | null;
-};
+import { LoginState } from "./bindings";
 
 const STATE_EVENT = "login-state-changed";
 
 export function useLoginState() {
-  const [state, setState] = useState<LoginState>({
-    state: "NotLogged",
-    token: null,
-    error: null,
-  });
+  const [state, setState] = useState<LoginState>("NotLogged");
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -43,10 +34,4 @@ export function useLoginState() {
   const logout = useCallback(() => invoke("logout"), []);
 
   return { state, ready, login, logout };
-}
-
-export function useLoginToken() {
-  const { state } = useLoginState();
-  if (state.state !== "Logged") return null;
-  return state.token;
 }

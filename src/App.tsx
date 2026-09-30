@@ -8,8 +8,8 @@ import {
 } from "@radix-ui/themes";
 import { SymbolIcon } from "@radix-ui/react-icons";
 import { useLoginState } from "./hooks";
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { commands, SiteInfo } from "./bindings";
 
 function WorkInProgress() {
   return (
@@ -20,19 +20,17 @@ function WorkInProgress() {
   );
 }
 
-function Logged() {
-  const { state, logout } = useLoginState();
-  // Runs without problems but tauri-specta is needed to bind rust types to ts types.
+function Logged({ token }: { token: string }) {
+  const { logout } = useLoginState();
   const [siteInfo, setSiteInfo] = useState<SiteInfo | null>(null);
 
   useEffect(() => {
     async function fetchSiteInfo() {
-      try {
-        const info = await invoke<SiteInfo>("get_site_info");
-        setSiteInfo(info);
+      const info = await commands.getSiteInfo();
+      if (info.status == "ok") {
+        setSiteInfo(info.data);
+      } else {
         console.log(info);
-      } catch (error) {
-        console.error("Failed to fetch site info:", error);
       }
     }
 
@@ -41,9 +39,8 @@ function Logged() {
 
   return (
     <Flex direction="column">
-      <Heading>
-        Welcome {siteInfo?.firstname} {siteInfo?.lastname}
-      </Heading>
+      <Heading>Welcome {siteInfo?.fullname}</Heading>
+      <Text>token: {token}</Text>
       <WorkInProgress />
       <Flex align="center" gap="2" mt="4">
         <Button onClick={logout}>Logout</Button>
@@ -74,13 +71,12 @@ function Logging() {
   );
 }
 
-function Error() {
-  const { state } = useLoginState();
+function Error({ error }: { error: string }) {
   return (
     <Flex direction="column">
       <Heading>An error occurred</Heading>
       <WorkInProgress />
-      <Text mt="4">{state.error}</Text>
+      <Text mt="4">{error}</Text>
     </Flex>
   );
 }
@@ -91,10 +87,14 @@ function App() {
   return (
     <Section p="4">
       <Container>
-        {state.state == "Logged" && <Logged></Logged>}
-        {state.state == "Logging" && <Logging></Logging>}
-        {state.state == "Error" && <Error></Error>}
-        {state.state == "NotLogged" && <NotLogged></NotLogged>}
+        {typeof state === "object" && state.Logged != null && (
+          <Logged token={state.Logged.token}></Logged>
+        )}
+        {state == "NotLogged" && <NotLogged></NotLogged>}
+        {state == "Logging" && <Logging></Logging>}
+        {typeof state === "object" && state.Error != null && (
+          <Error error={state.Error.error}></Error>
+        )}
       </Container>
     </Section>
   );
