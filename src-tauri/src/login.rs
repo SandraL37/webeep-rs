@@ -1,41 +1,9 @@
-use crate::AppState;
+use crate::{AppState, login::error::LoginError};
 use base64::Engine;
 use tauri::{Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::MutexGuard;
 
-#[derive(Debug, Clone, Copy, serde::Serialize, specta::Type)]
-pub enum LoginError {
-    LoginWindowClosed,
-    IncompatibleWithCurrentWeBeep,
-    KeyringError,
-    TauriError,
-}
-
-impl From<LoginError> for std::string::String {
-    fn from(e: LoginError) -> Self {
-        format!("{:?}", e)
-    }
-}
-
-impl From<keyring::Error> for LoginError {
-    fn from(_: keyring::Error) -> Self {
-        LoginError::KeyringError
-    }
-}
-
-impl From<tauri::Error> for LoginError {
-    fn from(_: tauri::Error) -> Self {
-        LoginError::TauriError
-    }
-}
-
-impl std::fmt::Display for LoginError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[LoginError]: {:?}", self)
-    }
-}
-
-impl std::error::Error for LoginError {}
+pub mod error;
 
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub enum LoginState {

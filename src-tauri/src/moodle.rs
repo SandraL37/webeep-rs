@@ -6,7 +6,7 @@ use tauri_plugin_http::reqwest;
 
 use crate::{
     AppState,
-    login::LoginState,
+    login::{LoginManager, LoginState},
     moodle::{error::MoodleError, models::SiteInfo},
 };
 
@@ -29,26 +29,15 @@ impl MoodleService {
         }
     }
 
-    pub async fn get_token(&self) -> Result<String, MoodleError> {
-        match self
-            .app_handle
-            .state::<AppState>()
-            .login_manager
-            .lock()
-            .await
-            .get_state()
-        {
-            LoginState::Logged { token } => Ok(token),
-            _ => Err(MoodleError::Unauthenticated),
-        }
-    }
-
     pub async fn call<T: DeserializeOwned>(
         &self,
         wsfunction: &str,
         params: Option<HashMap<&str, &str>>,
     ) -> Result<T, MoodleError> {
-        let token = self.get_token().await?;
+        let token = match LoginManager::instance(&self.app_handle).await.get_state() {
+            LoginState::Logged { token } => Ok(token),
+            _ => Err(MoodleError::Unauthenticated),
+        }?;
 
         let mut form = HashMap::new();
         form.insert("wstoken", token.as_str());
