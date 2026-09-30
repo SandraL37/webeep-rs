@@ -9,7 +9,7 @@ import {
 import { SymbolIcon } from "@radix-ui/react-icons";
 import { useLoginState } from "./hooks";
 import { useEffect, useState } from "react";
-import { commands, SiteInfo } from "./bindings";
+import { commands, LoginError, SiteInfo } from "./bindings";
 
 function WorkInProgress() {
   return (
@@ -21,7 +21,6 @@ function WorkInProgress() {
 }
 
 function Logged({ token }: { token: string }) {
-  const { logout } = useLoginState();
   const [siteInfo, setSiteInfo] = useState<SiteInfo | null>(null);
 
   useEffect(() => {
@@ -43,19 +42,18 @@ function Logged({ token }: { token: string }) {
       <Text>token: {token}</Text>
       <WorkInProgress />
       <Flex align="center" gap="2" mt="4">
-        <Button onClick={logout}>Logout</Button>
+        <Button onClick={commands.logout}>Logout</Button>
       </Flex>
     </Flex>
   );
 }
 
 function NotLogged() {
-  const { login } = useLoginState();
   return (
     <Flex direction="column" align="start">
       <Heading>Welcome to Webeep-RS</Heading>
       <WorkInProgress />
-      <Button mt="4" onClick={login}>
+      <Button mt="4" onClick={commands.login}>
         Login
       </Button>
     </Flex>
@@ -71,12 +69,12 @@ function Logging() {
   );
 }
 
-function Error({ error }: { error: string }) {
+function Error({ error }: { error: LoginError }) {
   return (
     <Flex direction="column">
       <Heading>An error occurred</Heading>
       <WorkInProgress />
-      <Text mt="4">{error}</Text>
+      <Text mt="4">{error.toString()}</Text>
     </Flex>
   );
 }

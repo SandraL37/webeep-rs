@@ -6,6 +6,8 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 export const commands = {
 	getSiteInfo: () => typedError<SiteInfo, string>(__TAURI_INVOKE("get_site_info")),
 	getLoginState: () => typedError<LoginState, string>(__TAURI_INVOKE("get_login_state")),
+	login: () => typedError<null, string>(__TAURI_INVOKE("login")),
+	logout: () => typedError<null, string>(__TAURI_INVOKE("logout")),
 };
 
 /* Types */
@@ -19,7 +21,7 @@ export type Function = {
 	version: string,
 };
 
-export type LoginError = "LoginWindowClosed" | "IncompatibleWithCurrentWeBeep" | "KeyringError" | "TauriError";
+export type LoginError = "LoginWindowClosed" | "IncompatibleWithCurrentWeBeep" | ({ KeyringError: string }) & { TauriError?: never } | ({ TauriError: string }) & { KeyringError?: never };
 
 export type LoginState = ({ Logged: {
 	token: string,
