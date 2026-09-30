@@ -28,6 +28,7 @@ thiserror = "2.0.21"
 tauri-specta = { version = "2.0.0-rc.25", features = ["typescript"] }
 specta = { version = "2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "0.0.12"
+tokio = "1.53.1"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

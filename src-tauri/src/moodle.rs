@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Manager};
@@ -7,7 +7,7 @@ use tauri_plugin_http::reqwest;
 use crate::{
     AppState,
     login::LoginState,
-    moodle::{error::Error, models::SiteInfo},
+    moodle::{error::MoodleError, models::SiteInfo},
 };
 
 pub mod error;
@@ -29,7 +29,7 @@ impl MoodleService {
         }
     }
 
-    pub async fn get_token(&self) -> Result<String, Error> {
+    pub async fn get_token(&self) -> Result<String, MoodleError> {
         match self
             .app_handle
             .state::<AppState>()
@@ -39,7 +39,7 @@ impl MoodleService {
             .get_state()
         {
             LoginState::Logged { token } => Ok(token),
-            _ => Err(Error::Unauthenticated),
+            _ => Err(MoodleError::Unauthenticated),
         }
     }
 
@@ -47,7 +47,7 @@ impl MoodleService {
         &self,
         wsfunction: &str,
         params: Option<HashMap<&str, &str>>,
-    ) -> Result<T, Error> {
+    ) -> Result<T, MoodleError> {
         let token = self.get_token().await?;
 
         let mut form = HashMap::new();
@@ -76,18 +76,24 @@ impl MoodleService {
         if let Ok(err_val) = serde_json::from_slice::<serde_json::Value>(&bytes) {
             if let Some(err_code) = err_val.get("errorcode").and_then(|v| v.as_str()) {
                 if err_code == "invalidtoken" {
-                    return Err(Error::InvalidToken);
+                    return Err(MoodleError::InvalidToken);
                 }
                 let msg = err_val["message"].as_str().unwrap_or("Unknown error");
-                return Err(Error::Moodle(msg.to_string()));
+                return Err(MoodleError::Moodle(msg.to_string()));
             }
         }
 
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    pub async fn get_site_info(&self) -> Result<SiteInfo, Error> {
+    pub async fn get_site_info(&self) -> Result<SiteInfo, MoodleError> {
         self.call::<SiteInfo>("core_webservice_get_site_info", None)
             .await
+    }
+}
+
+impl MoodleService {
+    pub fn instance(app_handle: &AppHandle) -> Arc<Self> {
+        app_handle.state::<AppState>().moodle_service.clone()
     }
 }

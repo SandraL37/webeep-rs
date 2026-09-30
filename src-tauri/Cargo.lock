@@ -5047,6 +5047,7 @@ dependencies = [
  "tauri-plugin-http",
  "tauri-specta",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

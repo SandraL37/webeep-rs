@@ -1,6 +1,7 @@
 use crate::AppState;
 use base64::Engine;
 use tauri::{Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::MutexGuard;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, specta::Type)]
 pub enum LoginError {
@@ -8,6 +9,12 @@ pub enum LoginError {
     IncompatibleWithCurrentWeBeep,
     KeyringError,
     TauriError,
+}
+
+impl From<LoginError> for std::string::String {
+    fn from(e: LoginError) -> Self {
+        format!("{:?}", e)
+    }
 }
 
 impl From<keyring::Error> for LoginError {
@@ -39,6 +46,7 @@ pub enum LoginState {
 }
 
 pub struct LoginManager {
+    app_handle: tauri::AppHandle,
     state: LoginState,
 }
 
@@ -78,7 +86,7 @@ impl LoginManager {
         entry.get_password().ok()
     }
 
-    fn set_state(&mut self, app: &tauri::AppHandle, state: LoginState) -> Result<(), LoginError> {
+    fn set_state(&mut self, state: LoginState) -> Result<(), LoginError> {
         match &state {
             LoginState::Logged { token } => Self::write_token(Some(token))?,
             LoginState::NotLogged | LoginState::Logging | LoginState::Error { .. } => {
@@ -87,25 +95,22 @@ impl LoginManager {
         }
         self.state = state;
 
-        app.emit("login-state-changed", self.state.clone())?;
+        self.app_handle
+            .emit("login-state-changed", self.state.clone())?;
         Ok(())
     }
 
-    fn capture_token(
-        &mut self,
-        target_url: &Url,
-        app: &tauri::AppHandle,
-    ) -> Result<Option<String>, LoginError> {
+    fn capture_token(&mut self, target_url: &Url) -> Result<Option<String>, LoginError> {
         // Logged in
         if target_url.as_str() == Self::WEBEEP_MY_URL {
-            let Some(window) = app.get_webview_window(Self::WINDOW_LABEL) else {
+            let Some(window) = self.app_handle.get_webview_window(Self::WINDOW_LABEL) else {
                 return Err(LoginError::LoginWindowClosed);
             };
             let redirect_url = Self::url(Self::WEBEEP_MOODLE_REDIRECT);
             window.navigate(redirect_url)?;
         // Capture the token
         } else if target_url.as_str().starts_with(Self::MOODLE_PROTOCOL) {
-            if let Some(window) = app.get_webview_window(Self::WINDOW_LABEL) {
+            if let Some(window) = self.app_handle.get_webview_window(Self::WINDOW_LABEL) {
                 window.close()?;
             }
 
@@ -125,12 +130,9 @@ impl LoginManager {
                 return Err(LoginError::IncompatibleWithCurrentWeBeep);
             };
 
-            self.set_state(
-                &app,
-                LoginState::Logged {
-                    token: String::from(token),
-                },
-            )?;
+            self.set_state(LoginState::Logged {
+                token: String::from(token),
+            })?;
 
             return Ok(Some(String::from(token)));
         }
@@ -143,27 +145,21 @@ impl LoginManager {
     }
 
     const WINDOW_LABEL: &str = "polimi-login";
-    pub async fn login(app: tauri::AppHandle) -> Result<(), LoginError> {
-        // Set focus on existing window, if any (Slient failure is ok)
-        app.get_webview_window(Self::WINDOW_LABEL)
+    pub async fn login(&mut self) -> Result<(), LoginError> {
+        // Set focus on existing window, if any (Silent failure is ok)
+        self.app_handle
+            .get_webview_window(Self::WINDOW_LABEL)
             .and_then(|window| window.set_focus().ok());
 
-        let app_cloned = app.clone();
+        self.set_state(LoginState::Logging)?;
 
-        {
-            let state = app_cloned.state::<AppState>();
-            state
-                .login_manager
-                .lock()
-                .await
-                .set_state(&app_cloned, LoginState::Logging)?;
-        }
-
-        let app_cloned = app.clone();
+        // Clones for the closures
+        let app_handle_nav = self.app_handle.clone();
+        let app_handle_evt = self.app_handle.clone();
 
         // Build the embedded secondary window
         let window = WebviewWindowBuilder::new(
-            &app,
+            &self.app_handle,
             Self::WINDOW_LABEL,
             WebviewUrl::External(Self::url(Self::WEBEEP_AUTH_URL)),
         )
@@ -171,19 +167,16 @@ impl LoginManager {
         .inner_size(1000.0, 600.0)
         .focused(true)
         .on_navigation(move |target_url| {
-            let app = app_cloned.clone();
             let target_url = target_url.clone();
+            let app_handle = app_handle_nav.clone();
 
+            // Spawn async task to acquire lock and run capture_token
             tauri::async_runtime::spawn(async move {
-                let state = app.state::<AppState>();
-                let mut login_manager = state.login_manager.lock().await;
-
-                let result = login_manager.capture_token(&target_url, &app);
+                let mut manager = Self::instance(&app_handle).await;
+                let result = manager.capture_token(&target_url);
 
                 if let Err(e) = result {
-                    login_manager
-                        .set_state(&app, LoginState::Error { error: e })
-                        .ok();
+                    manager.set_state(LoginState::Error { error: e }).ok();
                 }
             });
 
@@ -193,17 +186,15 @@ impl LoginManager {
 
         window.clear_all_browsing_data()?;
 
-        let app_on_close = app.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::Destroyed = event {
-                let app = app_on_close.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app.state::<AppState>();
-                    let mut login_manager = state.login_manager.lock().await;
+                let app_handle = app_handle_evt.clone();
 
-                    // Only set to NotLogged if the user closed the window while still logging in
-                    if matches!(login_manager.get_state(), LoginState::Logging) {
-                        let _ = login_manager.set_state(&app, LoginState::NotLogged);
+                // Spawn async task to acquire lock and update state
+                tauri::async_runtime::spawn(async move {
+                    let mut manager = Self::instance(&app_handle).await;
+                    if matches!(manager.get_state(), LoginState::Logging) {
+                        let _ = manager.set_state(LoginState::NotLogged);
                     }
                 });
             }
@@ -212,30 +203,35 @@ impl LoginManager {
         Ok(())
     }
 
-    pub async fn logout(app: tauri::AppHandle) -> Result<(), LoginError> {
+    pub async fn logout(&mut self) -> Result<(), LoginError> {
         Self::write_token(None)?;
-        {
-            let state = app.state::<AppState>();
-
-            state
-                .login_manager
-                .lock()
-                .await
-                .set_state(&app, LoginState::NotLogged)?;
-        }
+        self.set_state(LoginState::NotLogged)?;
 
         Ok(())
     }
 
-    pub fn new() -> Self {
+    pub fn new(app_handle: tauri::AppHandle) -> Self {
         if let Some(token) = Self::read_token() {
             Self {
                 state: LoginState::Logged { token },
+                app_handle,
             }
         } else {
             Self {
                 state: LoginState::NotLogged,
+                app_handle,
             }
         }
+    }
+}
+
+impl LoginManager {
+    pub async fn instance<'a>(app_handle: &'a tauri::AppHandle) -> MutexGuard<'a, LoginManager> {
+        app_handle
+            .state::<AppState>()
+            .inner()
+            .login_manager
+            .lock()
+            .await
     }
 }
